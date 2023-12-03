@@ -1,4 +1,5 @@
 build:
-	clang inject.c -o inject.dylib -shared -Ldeps/ -lfrida-gum
+	clang plonk_inject.c -o inject.dylib -shared -Ldeps/ -lfrida-gum
+	cargo build
 
 .PHONY: build
