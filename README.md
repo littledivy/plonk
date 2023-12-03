@@ -1,3 +1,5 @@
+Plonk is a development-time build tool for Rust projects.
+
 My main tool for building Deno.
 
 1. Main binary crate `A` that imports `B`
