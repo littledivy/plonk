@@ -1,0 +1,9 @@
+[package]
+name = "example_lib"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+hot_swap = []
+
+[dependencies]
