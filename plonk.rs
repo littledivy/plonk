@@ -334,7 +334,7 @@ fn run(pargs: &mut Options) {
     lib.env("PLONK_LIBRARY", library_path).env(
         "DYLD_INSERT_LIBRARIES",
         "/Users/divy/gh/deno_build/inject.dylib",
-    );
+    ).env("PLONK_BINARY", bin);
 
     if pargs.verbose {
         println!("[*] Running: {:?}", lib);

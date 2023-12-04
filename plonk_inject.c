@@ -32,7 +32,7 @@ __attribute__((constructor))
 static void init() 
 {
   GumInterceptor * interceptor;
-  char *sym, *new_sym, *lib, *verbose;
+  char *sym, *new_sym, *lib, *bin, *verbose;
   void *dl, *original, *new;
 
   sym = getenv("SYMBOL");
@@ -40,6 +40,8 @@ static void init()
 
   /* Library with the new symbols */
   lib = getenv("PLONK_LIBRARY");
+  /* Binary with the original symbols */
+  bin = getenv("PLONK_BINARY");
   verbose = getenv("VERBOSE");
 
   if (!sym || !lib)
@@ -53,7 +55,8 @@ static void init()
   interceptor = gum_interceptor_obtain();
 
   original = GSIZE_TO_POINTER(gum_module_find_export_by_name(NULL, sym));
-
+  if (!original)
+    original = GSIZE_TO_POINTER(gum_module_find_symbol_by_name(bin, sym));
   if (!original) {
     fprintf(stderr, "[*] Could not find symbol %s in bin\n", sym);
     return;
