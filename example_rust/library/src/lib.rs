@@ -1,4 +1,4 @@
 #[no_mangle]
 pub fn say_hello() {
-     println!("Hello, world! x2");
+     println!("Hello, world! x3");
 }

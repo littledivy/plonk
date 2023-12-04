@@ -11,4 +11,5 @@ path = "plonk.rs"
 pico-args = "0.5.0"
 cargo_metadata = "0.18.1"
 notify-debouncer-mini = "0.4.1"
+rustc-demangle = { version = "0.1.23", features = ["std"] }
 notify = "6.1.1"

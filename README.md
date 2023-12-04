@@ -6,7 +6,6 @@ Plonk is a development-time build tool for Rust projects.
 # }
 $ cargo build -p example_cli
 
-# #[no_mangle]
 # pub fn say_hello() {
 #  println!("Hello x1");
 # }
@@ -17,7 +16,7 @@ $ cargo plonk \
 
 Hello x1
 
-$ echo "#[no_mangle]\npub fn say_hello() {\n  println!('Hello x2');\n}" > example_lib/lib.rs
+$ echo "pub fn say_hello() {\n  println!('Hello x2');\n}" > example_lib/lib.rs
 
 $ cargo plonk \
   run \

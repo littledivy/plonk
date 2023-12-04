@@ -53,8 +53,9 @@ static void init()
   interceptor = gum_interceptor_obtain();
 
   original = GSIZE_TO_POINTER(gum_module_find_export_by_name(NULL, sym));
+
   if (!original) {
-    fprintf(stderr, "[*] Could not find symbol %s\n", sym);
+    fprintf(stderr, "[*] Could not find symbol %s in bin\n", sym);
     return;
   }
 
@@ -68,7 +69,6 @@ static void init()
   new = GSIZE_TO_POINTER (gum_module_find_export_by_name(lib, new_sym));
   if (!new) {
     fprintf(stderr, "[*] Could not find symbol %s in %s\n", new_sym, lib);
-    fprintf(stderr, "    Did you forget #[no_mangle]?\n");
     return;
   }
 

@@ -23,6 +23,7 @@
 use cargo_metadata::{MetadataCommand, Node, Package, PackageId};
 use notify::RecursiveMode;
 use notify_debouncer_mini::new_debouncer;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -42,6 +43,7 @@ FLAGS:
     -s, --symbol     Hot reload for a specific symbol
     -r, --release    Build in release mode
     -w, --watch      Watch for changes and rebuild
+    -b, --bin        Manually specify binary package
 
 SUBCOMMANDS:
     build    Compile the package
@@ -55,6 +57,9 @@ struct Options {
 
     // -p, --package
     package: String,
+
+    // -b, --bin
+    bin: Option<String>,
 
     // -r, --release
     release: bool,
@@ -71,7 +76,7 @@ struct Options {
 fn main() {
     let mut pargs = pico_args::Arguments::from_env();
 
-    let cmd = pargs.subcommand().unwrap();
+    let mut cmd = pargs.subcommand().unwrap();
 
     if pargs.contains(["-h", "--help"]) {
         print!("{}", HELP);
@@ -83,11 +88,24 @@ fn main() {
         package: pargs
             .value_from_str(["-p", "--package"])
             .unwrap_or_else(|_| ".".to_string()),
+        bin: pargs.value_from_str(["-b", "--bin"]).ok(),
         release: pargs.contains(["-r", "--release"]),
         symbol: pargs.value_from_str(["-s", "--symbol"]).ok(),
         watch: pargs.contains(["-w", "--watch"]),
         ..Default::default()
     };
+
+    // Invoked as `cargo plonk`
+    if matches!(cmd.as_deref(), Some("plonk")) {
+        cmd = pargs.subcommand().unwrap();
+    }
+
+    let remaining = pargs.finish();
+    if !remaining.is_empty() {
+        println!("Unknown arguments: {:?}", remaining);
+        print!("{}", HELP);
+        return;
+    }
 
     match cmd.as_deref() {
         Some("build") => {
@@ -143,18 +161,14 @@ fn build(pargs: &mut Options) -> Option<cargo_metadata::Artifact> {
     }
 
     if pargs._internal_meta {
-        cargo
-            .arg("--message-format=json-render-diagnostics")
-            .stdout(std::process::Stdio::piped());
+        cargo.arg("--message-format=json-render-diagnostics");
     }
 
-    let mut cargo = cargo.spawn().expect("Failed to spawn cargo build");
-
-    let cargo_status = cargo.wait().expect("Failed to wait for cargo build");
-    assert!(cargo_status.success(), "Cargo build failed");
+    let cargo = cargo.output().expect("Failed to spawn cargo build");
 
     if pargs._internal_meta {
-        let reader = std::io::BufReader::new(cargo.stdout.take().unwrap());
+        let cursor = std::io::Cursor::new(&cargo.stdout[..]);
+        let reader = std::io::BufReader::new(cursor);
         for message in cargo_metadata::Message::parse_stream(reader) {
             let message = message.expect("Failed to parse message");
             match message {
@@ -171,7 +185,8 @@ fn build(pargs: &mut Options) -> Option<cargo_metadata::Artifact> {
     None
 }
 
-fn get_bin_crates(meta: &cargo_metadata::Metadata, release: bool) -> Option<String> {
+fn get_bin_crates(meta: &cargo_metadata::Metadata, release: bool) -> Vec<(String, String)> {
+    let mut bins = Vec::new();
     for pkg in meta.packages.iter() {
         for bin in pkg.targets.iter() {
             if bin.kind.contains(&"bin".to_string()) {
@@ -179,11 +194,11 @@ fn get_bin_crates(meta: &cargo_metadata::Metadata, release: bool) -> Option<Stri
                 path.push(if release { "release" } else { "debug" });
                 path.push(&bin.name);
 
-                return Some(path.to_string());
+                bins.push((pkg.name.clone(), path.to_string()));
             }
         }
     }
-    None
+    bins
 }
 
 // https://github.com/watchexec/cargo-watch/blob/da7e7f5c631adffce74be97949e7aadfaff1c953/src/options.rs#L165
@@ -257,7 +272,28 @@ fn run(pargs: &mut Options) {
     let cmd = cargo_metadata::MetadataCommand::new();
     let meta = cmd.exec().expect("Failed to get metadata");
 
-    let bin = get_bin_crates(&meta, pargs.release).expect("Failed to get binary crate");
+    let bins = get_bin_crates(&meta, pargs.release);
+    let (_, bin) = match &pargs.bin {
+        Some(package) => match bins.iter().find(|(pkg, _)| pkg == package) {
+            None => {
+                println!("No binary found with name: {}", package);
+                println!("Available binaries: {:?}", bins);
+                return;
+            }
+            Some(b) => b,
+        },
+        None => {
+            if bins.len() > 1 {
+                println!("Multiple binaries found. Use -b to specify a binary");
+                println!("Available binaries: {:?}", bins);
+                return;
+            } else if bins.len() == 0 {
+                println!("No binaries found");
+                return;
+            }
+            bins.first().unwrap()
+        }
+    };
 
     let library_path = artifact.filenames[0].clone();
     let mut lib = Command::new(&bin);
@@ -266,15 +302,43 @@ fn run(pargs: &mut Options) {
     }
 
     if let Some(symbol) = &pargs.symbol {
-        lib.env("SYMBOL", symbol);
+        let old_symbol = find_symbol(&bin, &pargs.package, symbol);
+        match old_symbol {
+            Some(old_symbol) => {
+                lib.env("SYMBOL", old_symbol.as_ref());
+            }
+            None => {
+                println!("Failed to find function symbol `{}` in {}", symbol, bin);
+                println!("See FAQ"); // TODO
+                return;
+            }
+        }
+        let new_symbol =
+            find_symbol(library_path.as_ref(), &pargs.package, symbol);
+        match new_symbol {
+            Some(new_symbol) => {
+                lib.env("NEW_SYMBOL", new_symbol.as_ref());
+            }
+            None => {
+                println!("Failed to find function symbol `{}` in {}", symbol, library_path);
+                println!("See FAQ"); // TODO
+                return;
+            }
+        };
     } else {
         println!("No symbol specified. Use -s to specify a function");
         print!("{}", HELP);
         return;
     }
 
-    lib.env("PLONK_LIBRARY", library_path)
-        .env("DYLD_INSERT_LIBRARIES", "../inject.dylib");
+    lib.env("PLONK_LIBRARY", library_path).env(
+        "DYLD_INSERT_LIBRARIES",
+        "/Users/divy/gh/deno_build/inject.dylib",
+    );
+
+    if pargs.verbose {
+        println!("[*] Running: {:?}", lib);
+    }
 
     let mut lib = match lib.spawn() {
         Ok(lib) => lib,
@@ -288,4 +352,45 @@ fn run(pargs: &mut Options) {
     };
 
     lib.wait().expect("Failed to wait for bin");
+}
+
+fn find_symbol<'a>(path: &str, package: &str, symbol: &'a str) -> Option<Cow<'a, str>> {
+    let full_symbol = format!("{}::{}", package, symbol);
+    let mut cmd = Command::new("nm");
+    cmd.arg(path);
+    let cmd = cmd.output().expect("Failed to spawn nm");
+
+    let stdout = std::str::from_utf8(&cmd.stdout[..]).expect("Failed to parse nm output");
+    let stdout = stdout.split("\n").collect::<Vec<&str>>();
+
+    for line in stdout {
+        let line = line.trim();
+        let cols = line.split(" ").collect::<Vec<&str>>();
+        if cols.len() < 3 {
+            continue;
+        }
+        if cols[1] == "t" || cols[1] == "T" {
+            if cols[2] == symbol {
+                return Some(symbol.into());
+            }
+
+            #[cfg(target_os = "macos")]
+            // _<symbol>.
+            if cols[2] == format!("_{}", symbol) {
+                return Some(symbol.into());
+            }
+
+            let demangled = rustc_demangle::demangle(cols[2]).to_string();
+            if demangled.contains(&full_symbol) {
+                #[cfg(target_os = "macos")]
+                // Remove _ from _<symbol>.
+                return Some(cols[2][1..].to_string().into());
+
+                #[cfg(not(target_os = "macos"))]
+                return Some(cols[2].to_string().into());
+            }
+        }
+    }
+
+    None
 }
