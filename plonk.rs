@@ -23,9 +23,9 @@
 use cargo_metadata::{MetadataCommand, Node, Package, PackageId};
 use notify::RecursiveMode;
 use notify_debouncer_mini::new_debouncer;
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
@@ -71,12 +71,34 @@ struct Options {
     watch: bool,
 
     _internal_meta: bool,
+    forward: Vec<OsString>,
+    watch_cache: WatchCache,
+}
+
+#[derive(Default)]
+struct WatchCache {
+    bin_symbol: Option<String>,
 }
 
 const INJECT_DYLIB: &'static str = env!("PLONK_INJECT_DYLIB");
 
 fn main() {
-    let mut pargs = pico_args::Arguments::from_env();
+    // `from_vec` takes `OsString`, not `String`.
+    let mut args: Vec<_> = std::env::args_os().collect();
+    args.remove(0); // remove the executable path.
+
+    // Find and process `--`.
+    let forward = if let Some(dash_dash) = args.iter().position(|arg| arg == "--") {
+        // Store all arguments following ...
+        let later_args = args.drain(dash_dash + 1..).collect();
+        // .. then remove the `--`
+        args.pop();
+        later_args
+    } else {
+        Vec::new()
+    };
+
+    let mut pargs = pico_args::Arguments::from_vec(args);
 
     let mut cmd = pargs.subcommand().unwrap();
 
@@ -94,6 +116,7 @@ fn main() {
         release: pargs.contains(["-r", "--release"]),
         symbol: pargs.value_from_str(["-s", "--symbol"]).ok(),
         watch: pargs.contains(["-w", "--watch"]),
+        forward,
         ..Default::default()
     };
 
@@ -149,6 +172,7 @@ fn build(pargs: &mut Options) -> Option<cargo_metadata::Artifact> {
 
     let mut cargo = Command::new("cargo");
     cargo
+        .env("RUSTFLAGS", "-C prefer-dynamic")
         .arg("rustc")
         .arg("--crate-type=dylib")
         .arg("-p")
@@ -166,7 +190,10 @@ fn build(pargs: &mut Options) -> Option<cargo_metadata::Artifact> {
         cargo.arg("--message-format=json-render-diagnostics");
     }
 
+    cargo.stderr(std::process::Stdio::inherit());
+
     let cargo = cargo.output().expect("Failed to spawn cargo build");
+    assert!(cargo.status.success());
 
     if pargs._internal_meta {
         let cursor = std::io::Cursor::new(&cargo.stdout[..]);
@@ -262,6 +289,14 @@ fn find_local_deps() -> Result<Vec<PathBuf>, String> {
     Ok(local_deps.into_iter().collect::<Vec<PathBuf>>())
 }
 
+fn rustc_sysroot() -> PathBuf {
+    let mut cmd = Command::new("rustc");
+    cmd.arg("--print").arg("sysroot");
+    let cmd = cmd.output().expect("Failed to spawn rustc");
+    let stdout = std::str::from_utf8(&cmd.stdout[..]).expect("Failed to parse rustc output");
+    PathBuf::from(stdout.trim())
+}
+
 fn run(pargs: &mut Options) {
     if pargs.watch {
         pargs.watch = false;
@@ -304,10 +339,15 @@ fn run(pargs: &mut Options) {
     }
 
     if let Some(symbol) = &pargs.symbol {
-        let old_symbol = find_symbol(&bin, &pargs.package, symbol);
+        let old_symbol = pargs
+            .watch_cache
+            .bin_symbol
+            .clone()
+            .or_else(|| find_symbol(&bin, &pargs.package, symbol));
         match old_symbol {
             Some(old_symbol) => {
-                lib.env("SYMBOL", old_symbol.as_ref());
+                lib.env("SYMBOL", &old_symbol);
+                pargs.watch_cache.bin_symbol = Some(old_symbol);
             }
             None => {
                 println!("Failed to find function symbol `{}` in {}", symbol, bin);
@@ -315,10 +355,11 @@ fn run(pargs: &mut Options) {
                 return;
             }
         }
+
         let new_symbol = find_symbol(library_path.as_ref(), &pargs.package, symbol);
         match new_symbol {
             Some(new_symbol) => {
-                lib.env("NEW_SYMBOL", new_symbol.as_ref());
+                lib.env("NEW_SYMBOL", &new_symbol);
             }
             None => {
                 println!(
@@ -337,7 +378,12 @@ fn run(pargs: &mut Options) {
 
     lib.env("PLONK_LIBRARY", library_path)
         .env("DYLD_INSERT_LIBRARIES", INJECT_DYLIB)
+        .env("DYLD_LIBRARY_PATH", rustc_sysroot().join("lib"))
         .env("PLONK_BINARY", bin);
+
+    for arg in &pargs.forward {
+        lib.arg(arg);
+    }
 
     if pargs.verbose {
         println!("[*] Running: {:?}", lib);
@@ -357,7 +403,7 @@ fn run(pargs: &mut Options) {
     lib.wait().expect("Failed to wait for bin");
 }
 
-fn find_symbol<'a>(path: &str, package: &str, symbol: &'a str) -> Option<Cow<'a, str>> {
+fn find_symbol(path: &str, package: &str, symbol: &str) -> Option<String> {
     let full_symbol = format!("{}::{}", package, symbol);
     let mut cmd = Command::new("nm");
     cmd.arg(path);
@@ -380,17 +426,17 @@ fn find_symbol<'a>(path: &str, package: &str, symbol: &'a str) -> Option<Cow<'a,
             #[cfg(target_os = "macos")]
             // _<symbol>.
             if cols[2] == format!("_{}", symbol) {
-                return Some(symbol.into());
+                return Some(symbol.to_string());
             }
 
             let demangled = rustc_demangle::demangle(cols[2]).to_string();
             if demangled.contains(&full_symbol) {
                 #[cfg(target_os = "macos")]
                 // Remove _ from _<symbol>.
-                return Some(cols[2][1..].to_string().into());
+                return Some(cols[2][1..].to_string());
 
                 #[cfg(not(target_os = "macos"))]
-                return Some(cols[2].to_string().into());
+                return Some(cols[2].to_string());
             }
         }
     }

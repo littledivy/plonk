@@ -66,6 +66,7 @@ static void init()
   dl = dlopen(lib, RTLD_LAZY);
   if (!dl) {
     fprintf(stderr, "[*] Could not open library %s\n", lib);
+    fprintf(stderr, "[*] Error: %s\n", dlerror());
     return;
   }
 
