@@ -6,11 +6,7 @@ Plonk is a development-time build tool for Rust projects.
 cargo install cargo-plonk
 ```
 
-
-
-https://github.com/littledivy/plonk/assets/34997667/4621c92b-632b-415a-9904-a6573078213f
-
-
+![plonk_demo](https://github.com/littledivy/plonk/assets/34997667/bdc1e3c5-6740-42e7-b7b5-32c22cd45311)
 
 ```shell
 # fn main() {
