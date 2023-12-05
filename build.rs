@@ -55,8 +55,22 @@ fn main() {
 }
 
 fn download_deps() -> Result<(), Box<dyn std::error::Error>> {
-    let arch = "arm64";
-    let os = "macos";
+    let arch = if cfg!(target_arch = "x86_64") {
+        "x86_64"
+    } else if cfg!(target_arch = "aarch64") {
+        "arm64"
+    } else {
+        panic!("Unsupported architecture")
+    };
+
+    let os = if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        panic!("Unsupported OS")
+    };
+
     let version = "16.0.19";
 
     let devkit_name = format!("frida-gum-devkit-{}-{}-{}", version, os, arch);
