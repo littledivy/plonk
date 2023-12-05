@@ -13,3 +13,7 @@ cargo_metadata = "0.18.1"
 notify-debouncer-mini = "0.4.1"
 rustc-demangle = { version = "0.1.23", features = ["std"] }
 notify = "6.1.1"
+
+[build-dependencies]
+cc = "1.0.83"
+reqwest = { version = "0.11.22", features = ["blocking"] }

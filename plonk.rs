@@ -73,6 +73,8 @@ struct Options {
     _internal_meta: bool,
 }
 
+const INJECT_DYLIB: &'static str = env!("PLONK_INJECT_DYLIB");
+
 fn main() {
     let mut pargs = pico_args::Arguments::from_env();
 
@@ -313,14 +315,16 @@ fn run(pargs: &mut Options) {
                 return;
             }
         }
-        let new_symbol =
-            find_symbol(library_path.as_ref(), &pargs.package, symbol);
+        let new_symbol = find_symbol(library_path.as_ref(), &pargs.package, symbol);
         match new_symbol {
             Some(new_symbol) => {
                 lib.env("NEW_SYMBOL", new_symbol.as_ref());
             }
             None => {
-                println!("Failed to find function symbol `{}` in {}", symbol, library_path);
+                println!(
+                    "Failed to find function symbol `{}` in {}",
+                    symbol, library_path
+                );
                 println!("See FAQ"); // TODO
                 return;
             }
@@ -331,10 +335,9 @@ fn run(pargs: &mut Options) {
         return;
     }
 
-    lib.env("PLONK_LIBRARY", library_path).env(
-        "DYLD_INSERT_LIBRARIES",
-        "/Users/divy/gh/deno_build/inject.dylib",
-    ).env("PLONK_BINARY", bin);
+    lib.env("PLONK_LIBRARY", library_path)
+        .env("DYLD_INSERT_LIBRARIES", INJECT_DYLIB)
+        .env("PLONK_BINARY", bin);
 
     if pargs.verbose {
         println!("[*] Running: {:?}", lib);

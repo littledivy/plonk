@@ -26,7 +26,7 @@
 #include <stdlib.h>
 #include <dlfcn.h>
 
-#include "deps/frida-gum.h"
+#include "frida-gum.h"
 
 __attribute__((constructor))
 static void init() 
