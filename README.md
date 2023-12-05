@@ -33,3 +33,15 @@ $ cargo plonk \
 
 Hello x2
 ```
+
+## faq
+
+I am getting a "Library not loaded: @rpath/libstd" error:
+```
+[*] Could not open library ***.dylib
+[*] Error: dlopen(/Users/divy/gh/deno/target/debug/libdeno_crypto.dylib, 0x0001): Library not loaded: @rpath/libstd-5563368f93f04a18.dylib
+  Referenced from: <F601902F-B608-3EB8-A3A7-BC9069E46C28> ***.dylib
+  Reason: tried: '/usr/local/lib/libstd-5563368f93f04a18.dylib' (no such file), '/usr/lib/libstd-5563368f93f04a18.dylib' (no such file, not in dyld cache)
+```
+
+You need to update your `$DYLD_LIBRARY_PATH` to include the rustc sysroot libraries: `$(rustc --print sysroot)/lib`
