@@ -30,7 +30,8 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
-mod plonk_inject;
+#[cfg(target_os = "windows")]
+mod plonk_inject_win;
 
 const HELP: &'static str = "\
 plonk
@@ -343,7 +344,7 @@ fn run(pargs: &mut Options) {
         lib.env("VERBOSE", "y");
     }
 
-    #[cfg(target_os = "unix")]
+    #[cfg(not(target_os = "windows"))]
     {
         if let Some(symbol) = &pargs.symbol {
             let old_symbol = pargs
@@ -416,9 +417,10 @@ fn run(pargs: &mut Options) {
         println!("[*] Running: {:?}", lib);
     }
 
-    if cfg!(target_os = "windows") {
+    #[cfg(target_os = "windows")]
+    {
         let escaped = INJECT_DYLIB.replace("\\", "\\\\");
-        unsafe { plonk_inject::inject(&mut lib, &escaped) };
+        unsafe { plonk_inject_win::inject(&mut lib, &escaped) };
 
         return;
     }
@@ -437,7 +439,7 @@ fn run(pargs: &mut Options) {
     lib.wait().expect("Failed to wait for bin");
 }
 
-#[cfg(target_os = "unix")]
+#[cfg(not(target_os = "windows"))]
 fn find_symbol(path: &str, package: &str, symbol: &str) -> Option<String> {
     let full_symbol = format!("{}::{}", package, symbol);
     let mut cmd = Command::new("nm");
