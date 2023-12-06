@@ -377,9 +377,17 @@ fn run(pargs: &mut Options) {
     }
 
     lib.env("PLONK_LIBRARY", library_path)
-        .env("DYLD_INSERT_LIBRARIES", INJECT_DYLIB)
-        .env("DYLD_LIBRARY_PATH", rustc_sysroot().join("lib"))
         .env("PLONK_BINARY", bin);
+    #[cfg(target_os = "macos")]
+    {
+        lib.env("DYLD_INSERT_LIBRARIES", INJECT_DYLIB)
+            .env("DYLD_LIBRARY_PATH", rustc_sysroot().join("lib"));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        lib.env("LD_PRELOAD", INJECT_DYLIB)
+            .env("LD_LIBRARY_PATH", rustc_sysroot().join("lib"));
+    }
 
     for arg in &pargs.forward {
         lib.arg(arg);
