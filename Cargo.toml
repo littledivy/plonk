@@ -15,7 +15,7 @@ rustc-demangle = { version = "0.1.23", features = ["std"] }
 notify = "6.1.1"
 
 [target.x86_64-pc-windows-msvc.dependencies]
-dynasmrt = "*"
+dynasmrt = "2.0.0"
 winapi = { version = "*", features = ["memoryapi", "synchapi"] }
 
 [build-dependencies]
