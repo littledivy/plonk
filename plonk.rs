@@ -29,7 +29,6 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
-use winapi::shared::cfg;
 
 mod plonk_inject;
 
@@ -75,15 +74,17 @@ struct Options {
 
     _internal_meta: bool,
     forward: Vec<OsString>,
+
+    #[allow(dead_code)]
     watch_cache: WatchCache,
 }
 
 #[derive(Default)]
 struct WatchCache {
+    #[allow(dead_code)]
     bin_symbol: Option<String>,
 }
 
-#[cfg(target_os = "unix")]
 const INJECT_DYLIB: &'static str = env!("PLONK_INJECT_DYLIB");
 
 fn main() {
@@ -395,6 +396,17 @@ fn run(pargs: &mut Options) {
         lib.env("LD_PRELOAD", INJECT_DYLIB)
             .env("LD_LIBRARY_PATH", rustc_sysroot().join("lib"));
     }
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(sym) = &pargs.symbol {
+            lib.env("SYMBOL", sym);
+            lib.env("NEW_SYMBOL", sym);
+        }
+        lib.env(
+            "PATH",
+            rustc_sysroot().join("lib/rustlib/x86_64-pc-windows-msvc/lib"),
+        );
+    }
 
     for arg in &pargs.forward {
         lib.arg(arg);
@@ -405,7 +417,8 @@ fn run(pargs: &mut Options) {
     }
 
     if cfg!(target_os = "windows") {
-        unsafe { plonk_inject::inject(&mut lib, library_path.as_str()) };
+        let escaped = INJECT_DYLIB.replace("\\", "\\\\");
+        unsafe { plonk_inject::inject(&mut lib, &escaped) };
 
         return;
     }
@@ -424,6 +437,7 @@ fn run(pargs: &mut Options) {
     lib.wait().expect("Failed to wait for bin");
 }
 
+#[cfg(target_os = "unix")]
 fn find_symbol(path: &str, package: &str, symbol: &str) -> Option<String> {
     let full_symbol = format!("{}::{}", package, symbol);
     let mut cmd = Command::new("nm");

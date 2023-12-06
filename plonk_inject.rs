@@ -20,23 +20,23 @@
  * THE SOFTWARE.
  */
 
+/* DLL injector for Windows */
+
 use std::mem::size_of;
+use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::AsRawHandle;
-use std::os::windows::process::CommandExt;
 use std::process::Command;
 
 use dynasmrt::dynasm;
 use dynasmrt::DynasmApi;
 use dynasmrt::DynasmLabelApi;
 use winapi::shared::minwindef::HMODULE;
-use winapi::um::processthreadsapi::ResumeThread;
 use winapi::um::synchapi::WaitForSingleObject;
-use winapi::um::winbase::CREATE_SUSPENDED;
 use winapi::um::winbase::INFINITE;
 use winapi::um::winbase::WAIT_FAILED;
 
+/// This uses the `CreateRemoteThread` technique to inject a DLL into the process.
 pub unsafe fn inject(command: &mut Command, dll_path: &str) {
-    command.creation_flags(CREATE_SUSPENDED);
     let mut process = command.spawn().unwrap();
     let process_handle = process.as_raw_handle();
 
@@ -46,7 +46,7 @@ pub unsafe fn inject(command: &mut Command, dll_path: &str) {
     }
 
     let loadlib =
-        winapi::um::libloaderapi::GetProcAddress(k32, "LoadLibraryA\0".as_ptr() as *const i8)
+        winapi::um::libloaderapi::GetProcAddress(k32, "LoadLibraryW\0".as_ptr() as *const i8)
             as usize;
     if loadlib == 0 {
         panic!("Failed to get LoadLibraryA address");
@@ -65,10 +65,9 @@ pub unsafe fn inject(command: &mut Command, dll_path: &str) {
     dynasm!(ops
         ; .arch x64
         ; sub rsp, 40
-
-        ; mov rax, loadlib as _
+        ; mov rax, QWORD loadlib as i64
         ; call rax
-        ; movabs hmodule as _, eax
+        ; movabs hmodule as i64, eax
     );
 
     let label = ops.new_dynamic_label();
@@ -77,7 +76,7 @@ pub unsafe fn inject(command: &mut Command, dll_path: &str) {
         ; test rax, rax
         ; mov rax, 0
         ; jnz =>label
-        ; mov rax, get_last_error as _
+        ; mov rax, QWORD get_last_error as i64
         ; call rax
     );
     ops.dynamic_label(label);
@@ -95,8 +94,16 @@ pub unsafe fn inject(command: &mut Command, dll_path: &str) {
 
     write_process_memory(process_handle, code_alloc, &code).unwrap();
 
-    let parameter = alloc_remote(process_handle, dll_path.len() + 1).unwrap();
-    let _ = write_process_memory(process_handle, parameter, dll_path.as_bytes()).unwrap();
+    let wide_dll_path = std::ffi::OsStr::new(dll_path)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let wide_dll_byte_slice = std::slice::from_raw_parts(
+        wide_dll_path.as_ptr() as *const u8,
+        wide_dll_path.len() * size_of::<u16>(),
+    );
+    let parameter = alloc_remote(process_handle, wide_dll_byte_slice.len()).unwrap();
+    write_process_memory(process_handle, parameter, wide_dll_byte_slice).unwrap();
 
     let thread_handle = winapi::um::processthreadsapi::CreateRemoteThread(
         process_handle,
@@ -138,11 +145,9 @@ pub unsafe fn inject(command: &mut Command, dll_path: &str) {
         if exit_code == 0xc0000005 {
             println!("Exit code: (Access violation)");
         } else {
-            print!("Exit code: {}", exit_code);
+            println!("{}", std::io::Error::from_raw_os_error(exit_code as i32));
         }
     }
-
-    ResumeThread(thread_handle);
 
     process.wait().unwrap();
 }
