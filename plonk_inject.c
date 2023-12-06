@@ -24,10 +24,43 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+
+#if defined(__APPLE__) || defined(__linux__)
 #include <dlfcn.h>
+#define plonk_dlopen(name) dlopen(name, RTLD_LAZY)
+#define plonk_dlerror() dlerror()
+#define plonk_getenv(name) getenv(name)
+#endif
+
+#if defined(_WIN32)
+#include <windows.h>
+const char *dlerror()
+{
+  static char buf[256];
+  DWORD err = GetLastError();
+  if (!err)
+    return NULL;
+  FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), buf,
+                sizeof(buf), NULL);
+  return buf;
+}
+char *plonk_getenv(const char *name)
+{
+  // TODO(littledivy): this leaks
+  char *buf = malloc(256);
+  DWORD len = GetEnvironmentVariable(name, buf, 256);
+  if (!len)
+    return NULL;
+  return buf;
+}
+#define plonk_dlopen(name) LoadLibrary(name)
+#define plonk_dlerror() dlerror()
+
+#endif
 
 #include "frida-gum.h"
-
+  
 __attribute__((constructor))
 static void init() 
 {
@@ -35,14 +68,14 @@ static void init()
   char *sym, *new_sym, *lib, *bin, *verbose;
   void *dl, *original, *new;
 
-  sym = getenv("SYMBOL");
-  new_sym = getenv("NEW_SYMBOL");
+  sym = plonk_getenv("SYMBOL");
+  new_sym = plonk_getenv("NEW_SYMBOL");
 
   /* Library with the new symbols */
-  lib = getenv("PLONK_LIBRARY");
+  lib = plonk_getenv("PLONK_LIBRARY");
   /* Binary with the original symbols */
-  bin = getenv("PLONK_BINARY");
-  verbose = getenv("VERBOSE");
+  bin = plonk_getenv("PLONK_BINARY");
+  verbose = plonk_getenv("VERBOSE");
 
   if (!sym || !lib)
     return;
@@ -63,10 +96,10 @@ static void init()
   }
 
   /* Leak (intentional) */
-  dl = dlopen(lib, RTLD_LAZY);
+  dl = plonk_dlopen(lib);
   if (!dl) {
     fprintf(stderr, "[*] Could not open library %s\n", lib);
-    fprintf(stderr, "[*] Error: %s\n", dlerror());
+    fprintf(stderr, "[*] Error: %s\n", plonk_dlerror());
     return;
   }
 

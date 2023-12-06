@@ -33,21 +33,37 @@ fn main() {
 
     download_deps().expect("Failed to download dependencies");
 
-    let inject_dylib = format!("{}/inject.dylib", out_dir);
+    let inject_dylib = format!(
+        "{}{}",
+        out_dir,
+        if cfg!(target_os = "windows") {
+            "\\inject.dll"
+        } else {
+            "/inject.dylib"
+        }
+    );
 
-    let output = Command::new("clang")
-        .args(&[
-            "plonk_inject.c",
-            "-o",
-            &inject_dylib,
-            "-shared",
-            &format!("-L{}", deps_dir),
-            &format!("-I{}", deps_dir),
-            "-lfrida-gum",
-        ])
-        .spawn()
-        .expect("failed to execute process");
+    let mut cmd = Command::new("clang");
+    cmd.args(&[
+        "plonk_inject.c",
+        "-o",
+        &inject_dylib,
+        "-shared",
+        &format!("-L{}", deps_dir),
+        &format!("-I{}", deps_dir),
+        "-lfrida-gum",
+    ]);
 
+    if cfg!(target_os = "windows") {
+        for lib in [
+            "dnsapi", "iphlpapi", "psapi", "winmm", "ws2_32", "advapi32", "crypt32", "gdi32",
+            "kernel32", "ole32", "secur32", "shell32", "shlwapi", "user32",
+        ] {
+            cmd.arg(format!("-l{}", lib));
+        }
+    }
+
+    let output = cmd.spawn().expect("failed to execute process");
     let output = output.wait_with_output().expect("failed to wait on child");
 
     assert!(output.status.success());
@@ -59,6 +75,8 @@ fn download_deps() -> Result<(), Box<dyn std::error::Error>> {
         "x86_64"
     } else if cfg!(target_arch = "aarch64") {
         "arm64"
+    } else if cfg!(target_os = "windows") {
+        "windows"
     } else {
         panic!("Unsupported architecture")
     };
@@ -67,6 +85,8 @@ fn download_deps() -> Result<(), Box<dyn std::error::Error>> {
         "macos"
     } else if cfg!(target_os = "linux") {
         "linux"
+    } else if cfg!(target_os = "windows") {
+        "windows"
     } else {
         panic!("Unsupported OS")
     };
