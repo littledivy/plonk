@@ -27,6 +27,11 @@ use std::path::Path;
 use std::process::Command;
 
 fn main() {
+    if cfg!(target_os = "windows") {
+        // nah, imma do my own thing
+        return;
+    }
+
     let out_dir = std::env::var("OUT_DIR").unwrap();
 
     let deps_dir = format!("{}/deps", out_dir);

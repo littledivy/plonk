@@ -29,6 +29,9 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
+use winapi::shared::cfg;
+
+mod plonk_inject;
 
 const HELP: &'static str = "\
 plonk
@@ -80,6 +83,7 @@ struct WatchCache {
     bin_symbol: Option<String>,
 }
 
+#[cfg(target_os = "unix")]
 const INJECT_DYLIB: &'static str = env!("PLONK_INJECT_DYLIB");
 
 fn main() {
@@ -338,45 +342,48 @@ fn run(pargs: &mut Options) {
         lib.env("VERBOSE", "y");
     }
 
-    if let Some(symbol) = &pargs.symbol {
-        let old_symbol = pargs
-            .watch_cache
-            .bin_symbol
-            .clone()
-            .or_else(|| find_symbol(&bin, &pargs.package, symbol));
-        match old_symbol {
-            Some(old_symbol) => {
-                lib.env("SYMBOL", &old_symbol);
-                pargs.watch_cache.bin_symbol = Some(old_symbol);
+    #[cfg(target_os = "unix")]
+    {
+        if let Some(symbol) = &pargs.symbol {
+            let old_symbol = pargs
+                .watch_cache
+                .bin_symbol
+                .clone()
+                .or_else(|| find_symbol(&bin, &pargs.package, symbol));
+            match old_symbol {
+                Some(old_symbol) => {
+                    lib.env("SYMBOL", &old_symbol);
+                    pargs.watch_cache.bin_symbol = Some(old_symbol);
+                }
+                None => {
+                    println!("Failed to find function symbol `{}` in {}", symbol, bin);
+                    println!("See FAQ"); // TODO
+                    return;
+                }
             }
-            None => {
-                println!("Failed to find function symbol `{}` in {}", symbol, bin);
-                println!("See FAQ"); // TODO
-                return;
-            }
-        }
 
-        let new_symbol = find_symbol(library_path.as_ref(), &pargs.package, symbol);
-        match new_symbol {
-            Some(new_symbol) => {
-                lib.env("NEW_SYMBOL", &new_symbol);
-            }
-            None => {
-                println!(
-                    "Failed to find function symbol `{}` in {}",
-                    symbol, library_path
-                );
-                println!("See FAQ"); // TODO
-                return;
-            }
-        };
-    } else {
-        println!("No symbol specified. Use -s to specify a function");
-        print!("{}", HELP);
-        return;
+            let new_symbol = find_symbol(library_path.as_ref(), &pargs.package, symbol);
+            match new_symbol {
+                Some(new_symbol) => {
+                    lib.env("NEW_SYMBOL", &new_symbol);
+                }
+                None => {
+                    println!(
+                        "Failed to find function symbol `{}` in {}",
+                        symbol, library_path
+                    );
+                    println!("See FAQ"); // TODO
+                    return;
+                }
+            };
+        } else {
+            println!("No symbol specified. Use -s to specify a function");
+            print!("{}", HELP);
+            return;
+        }
     }
 
-    lib.env("PLONK_LIBRARY", library_path)
+    lib.env("PLONK_LIBRARY", &library_path)
         .env("PLONK_BINARY", bin);
     #[cfg(target_os = "macos")]
     {
@@ -395,6 +402,12 @@ fn run(pargs: &mut Options) {
 
     if pargs.verbose {
         println!("[*] Running: {:?}", lib);
+    }
+
+    if cfg!(target_os = "windows") {
+        unsafe { plonk_inject::inject(&mut lib, library_path.as_str()) };
+
+        return;
     }
 
     let mut lib = match lib.spawn() {
